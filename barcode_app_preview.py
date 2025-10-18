@@ -22,46 +22,55 @@ def resource_path(relative_path):
 
 FONT_PATH = resource_path("DejaVuSans.ttf")
 
-# --- Génération du code-barres ---
-def generate_barcode(username, password, prenom, output_path):
+# --- Génération du code-barres (retourne image PIL) ---
+def generate_barcode_image(username, password, prenom):
     data = f"\t\t{username}\t{password}\n"
     code128 = barcode.get("code128", data, writer=ImageWriter())
-    temp_path = output_path.replace(".png", "_temp.png")
+    temp_path = "temp_barcode.png"
     code128.save(temp_path)
 
     barcode_img = Image.open(temp_path).convert("RGB")
+    os.remove(temp_path)
 
-    # Ajustement de la taille à 65x20 mm (300 dpi)
     img_width = int(WIDTH_MM * MM_TO_PX)
     img_height = int(HEIGHT_MM * MM_TO_PX)
     barcode_img = barcode_img.resize((img_width, img_height), Image.LANCZOS)
 
-    # Nouvelle image avec un espace sous le code-barres pour le prénom
     total_height = img_height + int(8 * MM_TO_PX)
     final_img = Image.new("RGB", (img_width, total_height), "white")
     final_img.paste(barcode_img, (0, 0))
     draw = ImageDraw.Draw(final_img)
 
-    # Police lisible
     try:
         font = ImageFont.truetype(FONT_PATH, size=int(10 * MM_TO_PX))
     except OSError:
         font = ImageFont.load_default()
 
-    # Centrage du prénom
     text_bbox = draw.textbbox((0, 0), prenom, font=font)
     text_width = text_bbox[2] - text_bbox[0]
     text_x = (img_width - text_width) // 2
     text_y = img_height + int(2 * MM_TO_PX)
     draw.text((text_x, text_y), prenom, fill="black", font=font)
 
-    final_img.save(output_path, dpi=(DPI, DPI))
-    os.remove(temp_path)
-
     return final_img
 
-# --- Interface graphique ---
-def generate_and_preview():
+# --- Actions interface ---
+def preview_barcode():
+    username = entry_username.get().strip()
+    password = entry_password.get().strip()
+    prenom = entry_prenom.get().strip()
+
+    if not username or not password or not prenom:
+        messagebox.showwarning("Champs manquants", "Veuillez remplir tous les champs.")
+        return
+
+    try:
+        pil_image = generate_barcode_image(username, password, prenom)
+        show_preview(pil_image)
+    except Exception as e:
+        messagebox.showerror("Erreur", str(e))
+
+def save_barcode():
     username = entry_username.get().strip()
     password = entry_password.get().strip()
     prenom = entry_prenom.get().strip()
@@ -75,28 +84,27 @@ def generate_and_preview():
         filetypes=[("Image PNG", "*.png")],
         title="Enregistrer le code-barres"
     )
-
     if not output_path:
         return
 
     try:
-        pil_image = generate_barcode(username, password, prenom, output_path)
+        pil_image = generate_barcode_image(username, password, prenom)
+        pil_image.save(output_path, dpi=(DPI, DPI))
+        messagebox.showinfo("Succès", f"Fichier enregistré :\n{output_path}")
         show_preview(pil_image)
     except Exception as e:
         messagebox.showerror("Erreur", str(e))
 
 def show_preview(pil_image):
-    # Création de l’image adaptée à la fenêtre (mise à l’échelle)
     preview_width = 600
     ratio = preview_width / pil_image.width
     preview_height = int(pil_image.height * ratio)
     img_resized = pil_image.resize((preview_width, preview_height), Image.LANCZOS)
     img_tk = ImageTk.PhotoImage(img_resized)
-
     preview_label.config(image=img_tk)
     preview_label.image = img_tk
 
-# --- Fenêtre principale ---
+# --- Interface principale ---
 root = tk.Tk()
 root.title("Générateur de codes-barres 128")
 
@@ -112,9 +120,13 @@ tk.Label(root, text="Prénom (affiché sous le code-barres) :").grid(row=2, colu
 entry_prenom = tk.Entry(root, width=30)
 entry_prenom.grid(row=2, column=1, padx=5, pady=5)
 
-btn_generate = tk.Button(root, text="Générer et Prévisualiser", command=generate_and_preview)
-btn_generate.grid(row=3, column=0, columnspan=2, pady=10)
+# Deux boutons côte à côte
+frame_buttons = tk.Frame(root)
+frame_buttons.grid(row=3, column=0, columnspan=2, pady=10)
+tk.Button(frame_buttons, text="Aperçu", width=15, command=preview_barcode).pack(side="left", padx=5)
+tk.Button(frame_buttons, text="Enregistrer", width=15, command=save_barcode).pack(side="left", padx=5)
 
+# Label d’aperçu
 preview_label = tk.Label(root)
 preview_label.grid(row=4, column=0, columnspan=2, padx=10, pady=10)
 
