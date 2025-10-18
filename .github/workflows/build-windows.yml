@@ -26,8 +26,8 @@ jobs:
 
     - name: Build executable
       run: |
-        pyinstaller --onefile --windowed --add-data "DejaVuSans.ttf;." --hidden-import=barcode --hidden-import=barcode.writer barcode_app_preview.py
-    
+        pyinstaller --onefile --windowed --hidden-import=barcode --hidden-import=barcode.writer barcode_app_preview.py
+
     - name: Upload EXE artifact
       uses: actions/upload-artifact@v4
       with:
