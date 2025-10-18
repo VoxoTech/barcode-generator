@@ -1,133 +1,139 @@
-import os
-import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 import barcode
 from barcode.writer import ImageWriter
+import io
 
-# --- Constantes ---
+# Conversion mm -> pixels à 300 dpi
+def mm_to_px(mm, dpi=300):
+    return int(mm / 25.4 * dpi)
+
+IMG_WIDTH = mm_to_px(65)
+IMG_HEIGHT = mm_to_px(20)
 DPI = 300
-MM_TO_PX = DPI / 25.4
-WIDTH_MM = 65
-HEIGHT_MM = 20
 
-def resource_path(relative_path):
-    """Trouve le chemin du fichier, même dans le binaire PyInstaller"""
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
-
-FONT_PATH = resource_path("DejaVuSans.ttf")
-
-# --- Génération du code-barres (retourne image PIL) ---
-def generate_barcode_image(username, password, prenom):
+def generate_barcode_image(username, password, first_name):
+    """Génère une image PIL du code-barres avec prénom sous le code."""
     data = f"\t\t{username}\t{password}\n"
-    code128 = barcode.get("code128", data, writer=ImageWriter())
-    temp_path = "temp_barcode.png"
-    code128.save(temp_path)
 
-    barcode_img = Image.open(temp_path).convert("RGB")
-    os.remove(temp_path)
+    CODE128 = barcode.get_barcode_class('code128')
+    code = CODE128(data, writer=ImageWriter())
 
-    img_width = int(WIDTH_MM * MM_TO_PX)
-    img_height = int(HEIGHT_MM * MM_TO_PX)
-    barcode_img = barcode_img.resize((img_width, img_height), Image.LANCZOS)
+    buffer = io.BytesIO()
+    code.write(buffer, {
+        'module_width': 0.25,
+        'module_height': 12,
+        'quiet_zone': 2,
+        'font_size': 0,
+        'dpi': DPI
+    })
+    buffer.seek(0)
 
-    total_height = img_height + int(8 * MM_TO_PX)
-    final_img = Image.new("RGB", (img_width, total_height), "white")
-    final_img.paste(barcode_img, (0, 0))
+    barcode_img = Image.open(buffer).convert("RGB")
+
+    # Créer image finale blanche
+    final_img = Image.new("RGB", (IMG_WIDTH, IMG_HEIGHT), "white")
     draw = ImageDraw.Draw(final_img)
 
+    barcode_h = int(IMG_HEIGHT * 0.8)
+    resized_barcode = barcode_img.resize((IMG_WIDTH, barcode_h))
+    final_img.paste(resized_barcode, (0, 0))
+
+    # Dessiner prénom centré
     try:
-        font = ImageFont.truetype(FONT_PATH, size=int(10 * MM_TO_PX))
-    except OSError:
+        font = ImageFont.truetype("Arial.ttf", 40)
+    except:
         font = ImageFont.load_default()
 
-    text_bbox = draw.textbbox((0, 0), prenom, font=font)
-    text_width = text_bbox[2] - text_bbox[0]
-    text_x = (img_width - text_width) // 2
-    text_y = img_height + int(2 * MM_TO_PX)
-    draw.text((text_x, text_y), prenom, fill="black", font=font)
+    # ✅ Compatible Pillow ≥10
+    try:
+        bbox = draw.textbbox((0, 0), first_name, font=font)
+        text_w = bbox[2] - bbox[0]
+        text_h_real = bbox[3] - bbox[1]
+    except AttributeError:
+        # Ancienne méthode Pillow <10
+        text_w, text_h_real = draw.textsize(first_name, font=font)
+
+    text_y = barcode_h + (IMG_HEIGHT - barcode_h - text_h_real) // 2
+    draw.text(((IMG_WIDTH - text_w)//2, text_y), first_name, fill="black", font=font)
 
     return final_img
 
-# --- Actions interface ---
-def preview_barcode():
-    username = entry_username.get().strip()
-    password = entry_password.get().strip()
-    prenom = entry_prenom.get().strip()
+class BarcodeApp(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("Générateur de code-barres (Code128)")
+        self.geometry("500x500")
+        self.resizable(False, False)
 
-    if not username or not password or not prenom:
-        messagebox.showwarning("Champs manquants", "Veuillez remplir tous les champs.")
-        return
+        tk.Label(self, text="Prénom :").pack(anchor="w", padx=10, pady=(10,0))
+        self.entry_first = tk.Entry(self, width=50)
+        self.entry_first.pack(padx=10, pady=5)
 
-    try:
-        pil_image = generate_barcode_image(username, password, prenom)
-        show_preview(pil_image)
-    except Exception as e:
-        messagebox.showerror("Erreur", str(e))
+        tk.Label(self, text="Nom d'utilisateur :").pack(anchor="w", padx=10)
+        self.entry_user = tk.Entry(self, width=50)
+        self.entry_user.pack(padx=10, pady=5)
 
-def save_barcode():
-    username = entry_username.get().strip()
-    password = entry_password.get().strip()
-    prenom = entry_prenom.get().strip()
+        tk.Label(self, text="Mot de passe :").pack(anchor="w", padx=10)
+        self.entry_pass = tk.Entry(self, show="*", width=50)
+        self.entry_pass.pack(padx=10, pady=5)
 
-    if not username or not password or not prenom:
-        messagebox.showwarning("Champs manquants", "Veuillez remplir tous les champs.")
-        return
+        frame_btn = tk.Frame(self)
+        frame_btn.pack(pady=10)
+        tk.Button(frame_btn, text="Aperçu", command=self.preview).pack(side="left", padx=5)
+        tk.Button(frame_btn, text="Enregistrer PNG", command=self.save).pack(side="left", padx=5)
 
-    output_path = filedialog.asksaveasfilename(
-        defaultextension=".png",
-        filetypes=[("Image PNG", "*.png")],
-        title="Enregistrer le code-barres"
-    )
-    if not output_path:
-        return
+        self.preview_label = tk.Label(self, text="(Aucun aperçu pour l’instant)")
+        self.preview_label.pack(pady=10)
 
-    try:
-        pil_image = generate_barcode_image(username, password, prenom)
-        pil_image.save(output_path, dpi=(DPI, DPI))
-        messagebox.showinfo("Succès", f"Fichier enregistré :\n{output_path}")
-        show_preview(pil_image)
-    except Exception as e:
-        messagebox.showerror("Erreur", str(e))
+        self.tk_preview_image = None
 
-def show_preview(pil_image):
-    preview_width = 600
-    ratio = preview_width / pil_image.width
-    preview_height = int(pil_image.height * ratio)
-    img_resized = pil_image.resize((preview_width, preview_height), Image.LANCZOS)
-    img_tk = ImageTk.PhotoImage(img_resized)
-    preview_label.config(image=img_tk)
-    preview_label.image = img_tk
+    def preview(self):
+        first = self.entry_first.get().strip()
+        user = self.entry_user.get().strip()
+        pwd = self.entry_pass.get().strip()
 
-# --- Interface principale ---
-root = tk.Tk()
-root.title("Générateur de codes-barres 128")
+        if not (first and user and pwd):
+            messagebox.showwarning("Champs vides", "Tous les champs doivent être remplis.")
+            return
 
-tk.Label(root, text="Nom d’utilisateur :").grid(row=0, column=0, padx=5, pady=5, sticky="e")
-entry_username = tk.Entry(root, width=30)
-entry_username.grid(row=0, column=1, padx=5, pady=5)
+        try:
+            img = generate_barcode_image(user, pwd, first)
+            preview_w = 400
+            ratio = preview_w / IMG_WIDTH
+            preview_h = int(IMG_HEIGHT * ratio)
+            img_preview = img.resize((preview_w, preview_h))
 
-tk.Label(root, text="Mot de passe :").grid(row=1, column=0, padx=5, pady=5, sticky="e")
-entry_password = tk.Entry(root, width=30)
-entry_password.grid(row=1, column=1, padx=5, pady=5)
+            self.tk_preview_image = ImageTk.PhotoImage(img_preview)
+            self.preview_label.configure(image=self.tk_preview_image, text="")
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Impossible de générer l'aperçu : {e}")
 
-tk.Label(root, text="Prénom (affiché sous le code-barres) :").grid(row=2, column=0, padx=5, pady=5, sticky="e")
-entry_prenom = tk.Entry(root, width=30)
-entry_prenom.grid(row=2, column=1, padx=5, pady=5)
+    def save(self):
+        first = self.entry_first.get().strip()
+        user = self.entry_user.get().strip()
+        pwd = self.entry_pass.get().strip()
 
-# Deux boutons côte à côte
-frame_buttons = tk.Frame(root)
-frame_buttons.grid(row=3, column=0, columnspan=2, pady=10)
-tk.Button(frame_buttons, text="Aperçu", width=15, command=preview_barcode).pack(side="left", padx=5)
-tk.Button(frame_buttons, text="Enregistrer", width=15, command=save_barcode).pack(side="left", padx=5)
+        if not (first and user and pwd):
+            messagebox.showwarning("Champs vides", "Tous les champs doivent être remplis.")
+            return
 
-# Label d’aperçu
-preview_label = tk.Label(root)
-preview_label.grid(row=4, column=0, columnspan=2, padx=10, pady=10)
+        output_path = filedialog.asksaveasfilename(
+            title="Enregistrer sous",
+            defaultextension=".png",
+            filetypes=[("Image PNG", "*.png")]
+        )
+        if not output_path:
+            return
 
-root.mainloop()
+        try:
+            img = generate_barcode_image(user, pwd, first)
+            img.save(output_path, dpi=(DPI, DPI))
+            messagebox.showinfo("Succès", f"Code-barres enregistré :\n{output_path}")
+        except Exception as e:
+            messagebox.showerror("Erreur", str(e))
+
+if __name__ == "__main__":
+    app = BarcodeApp()
+    app.mainloop()
