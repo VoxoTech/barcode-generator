@@ -2,7 +2,7 @@ import os
 import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageTk
 import barcode
 from barcode.writer import ImageWriter
 
@@ -32,25 +32,25 @@ def generate_barcode(username, password, prenom, output_path):
 
     barcode_img = Image.open(barcode_path).convert("RGB")
 
-    # Ajustement de la taille à 65x20 mm (300 dpi)
+    # Ajustement à 65x20 mm (300 dpi)
     img_width = int(WIDTH_MM * MM_TO_PX)
     img_height = int(HEIGHT_MM * MM_TO_PX)
     barcode_img = barcode_img.resize((img_width, img_height), Image.LANCZOS)
 
-    # Crée une nouvelle image avec un espace pour le prénom en dessous
+    # Nouvelle image avec espace pour le prénom
     total_height = img_height + int(8 * MM_TO_PX)
     final_img = Image.new("RGB", (img_width, total_height), "white")
     final_img.paste(barcode_img, (0, 0))
 
     draw = ImageDraw.Draw(final_img)
 
-    # Police TrueType (10 mm de haut environ)
+    # Police TrueType
     try:
         font = ImageFont.truetype(FONT_PATH, size=int(10 * MM_TO_PX))
     except OSError:
         font = ImageFont.load_default()
 
-    # Centrage du texte
+    # Centrage du prénom
     text_bbox = draw.textbbox((0, 0), prenom, font=font)
     text_width = text_bbox[2] - text_bbox[0]
     text_x = (img_width - text_width) // 2
@@ -60,6 +60,8 @@ def generate_barcode(username, password, prenom, output_path):
     # Sauvegarde finale
     final_img.save(output_path, dpi=(DPI, DPI))
     os.remove(barcode_path)
+
+    return final_img  # On retourne l'image PIL pour l'aperçu
 
 # --- Interface graphique ---
 def generate_and_preview():
@@ -81,18 +83,25 @@ def generate_and_preview():
         return
 
     try:
-        generate_barcode(username, password, prenom, output_path)
+        img = generate_barcode(username, password, prenom, output_path)
         messagebox.showinfo("Succès", f"Code-barres généré :\n{output_path}")
-        show_preview(output_path)
+        show_preview(img)
     except Exception as e:
         messagebox.showerror("Erreur", str(e))
 
-def show_preview(image_path):
+def show_preview(pil_image):
     preview = tk.Toplevel(root)
     preview.title("Aperçu du code-barres")
-    img = tk.PhotoImage(file=image_path)
-    label = tk.Label(preview, image=img)
-    label.image = img
+
+    # Redimensionne pour affichage sans perte
+    preview_width = 600
+    ratio = preview_width / pil_image.width
+    preview_height = int(pil_image.height * ratio)
+    img_resized = pil_image.resize((preview_width, preview_height), Image.LANCZOS)
+
+    img_tk = ImageTk.PhotoImage(img_resized)
+    label = tk.Label(preview, image=img_tk)
+    label.image = img_tk
     label.pack(padx=10, pady=10)
 
 # --- Fenêtre principale ---
